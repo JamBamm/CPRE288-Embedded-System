@@ -1,2 +1,2 @@
-# FinalProj
+# CPRE288 final project
 

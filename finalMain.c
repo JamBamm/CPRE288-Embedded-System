@@ -37,6 +37,23 @@ volatile float current_x = 0.0;
 volatile float current_y = 0.0;
 volatile int current_heading = 90;
 
+#define PI 3.14159265
+//Guess
+#define IR_JUMP_THRESHOLD 200
+#define MIN_OBJECT_WIDTH_DEG 6
+
+typedef struct {
+    uint8_t id;
+    uint8_t s_angle;
+    uint8_t e_angle;
+    uint16_t dist_cm;
+    uint8_t l_width_cm;
+    int16_t x;
+    int16_t y;
+    int16_t heading;
+    //maybe some others data usage shouldn't matter too much if we output to a file 
+} detectedObj;
+
 int main(void) {
     // 1. Initialize all hardware modules
     timer_init();
@@ -49,6 +66,8 @@ int main(void) {
     // 2. Initialize Roomba Base
     oi_t *sensor_data = oi_alloc();
     oi_init(sensor_data);
+
+
     
     lcd_printf("System Ready.\nWaiting for GUI...");
 	uart_sendStr("CYBOT INITIALIZED. WAITING FOR COMMANDS.\n");
@@ -92,25 +111,25 @@ int main(void) {
                 case 'w': // Forward
                     lcd_printf("Moving Forward");
                     uart_sendStr("STATUS: Moving Forward\n");
-                    move_forward_safe(sensor_data, 100); 
+                    //move_forward_safe(sensor_data, 10);
                     break;
                     
                 case 's': // Reverse
                     lcd_printf("Reversing");
                     uart_sendStr("STATUS: Reversing\n");
-                    // move_backward_safe(sensor_data, 100);
+                    // move_backward_safe(sensor_data, 10);
                     break;
                     
                 case 'a': // Turn Left
                     lcd_printf("Turning Left");
                     uart_sendStr("STATUS: Turning Left\n");
-                    // turn_left(sensor_data, 45); 
+                    // turn_left(sensor_data, 5);
                     break;
                     
                 case 'd': // Turn Right
                     lcd_printf("Turning Right");
                     uart_sendStr("STATUS: Turning Right\n");
-                    // turn_right(sensor_data, 45);
+                    // turn_right(sensor_data, 5);
                     break;
                     
                 case 'p': // Perform full sensor sweep
