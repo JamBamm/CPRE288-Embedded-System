@@ -1,0 +1,200 @@
+#include "Timer.h"
+#include "lcd.h"
+#include "cyBot_Scan.h"
+#include "uart-interrupt.h"
+#include "open_interface.h"
+#include "movement.h"
+#include <stdbool.h>
+#include <stdio.h>
+#include <math.h>
+
+#define PI 3.14159265
+// 500 roughly equates to ~80cm on the Sharp IR sensor. Tune this to your bot!
+#define IR_THRESHOLD 500 
+
+extern volatile char command_byteGo;
+extern volatile char command_byteStop;
+extern volatile int command_flag;
+
+typedef struct {
+    int id;
+    int start_angle;
+    int end_angle;
+    double distance_cm;
+    double linear_width_cm; 
+} detectedObj;
+
+// --- SCANNING FUNCTION ---
+// --- 1-DEGREE RESOLUTION SCANNING FUNCTION ---
+detectedObj scan_and_find_smallest() {
+    cyBOT_Scan_t scan_data;
+    char buffer[100];
+    
+    detectedObj smallest_obj;
+    smallest_obj.id = -1;
+    smallest_obj.linear_width_cm = 1000.0; // Start impossibly large
+
+    int object_start = -1;
+    int object_count = 0;
+    int i, j;
+
+    uart_sendStr("\r\n--- SCANNING FIELD (High Res) ---\r\n");
+
+    // TWEAK 1: i++ scans every single degree
+    for (i = 0; i <= 180; i++) { 
+        
+        // Immediate interrupt check during the scan loop
+        if (command_flag == 2) {
+            uart_sendStr("\r\nScan Interrupted by User\r\n");
+            return smallest_obj; 
+        }
+
+        // Average 3 raw IR values per degree
+        int ir_sum = 0;
+        for (j = 0; j < 3; j++) {
+            cyBOT_Scan(i, &scan_data);
+            ir_sum += scan_data.IR_raw_val;
+        }
+        int ir_avg = ir_sum / 3;
+
+        // Edge Detection
+        if (ir_avg > IR_THRESHOLD) {
+            if (object_start == -1) {
+                object_start = i; 
+            }
+        } 
+        else {
+            if (object_start != -1) {
+                // TWEAK 2: Since we increment by 1, the object ended 1 degree ago
+                int object_end = i - 1; 
+                int radial_width = object_end - object_start;
+
+                // Filter out noise (objects less than 4 degrees wide are likely ghosts)
+                if (radial_width >= 4) {
+                    object_count++;
+                    
+                    int midpoint = object_start + (radial_width / 2);
+                    cyBOT_Scan(midpoint, &scan_data);
+                    double distance = scan_data.sound_dist;
+
+                    // Calculate actual linear width using arc length
+                    double linear_width = 2.0 * PI * distance * ((double)radial_width / 360.0);
+
+                    sprintf(buffer, "Obj %d: Start: %d, End: %d, Dist: %.2f cm, Width: %.2f cm\r\n", 
+                            object_count, object_start, object_end, distance, linear_width);
+                    uart_sendStr(buffer);
+
+                    if (linear_width < smallest_obj.linear_width_cm) {
+                        smallest_obj.id = object_count;
+                        smallest_obj.start_angle = object_start;
+                        smallest_obj.end_angle = object_end;
+                        smallest_obj.distance_cm = distance;
+                        smallest_obj.linear_width_cm = linear_width;
+                    }
+                }
+                object_start = -1; 
+            }
+        }
+    }
+    return smallest_obj;
+}
+
+// --- MAIN LOOP ---
+int main(void) {
+    timer_init(); 
+    lcd_init();
+    uart_interrupt_init();
+    cyBOT_init_Scan(0b0011); // Enable Servo, PING, and IR
+    
+    oi_t *sensor_data = oi_alloc();
+    oi_init(sensor_data);
+
+    char buffer[100];
+
+    command_byteGo = 'g';
+    command_byteStop = 's';
+
+    uart_sendStr("\r\nSystem Ready. Send 'g' to start autonomous mission, 's' to stop.\r\n> ");
+
+    while(1) {
+        
+        // Manual Interrupt Check while Idle
+        if (command_flag == 2) {
+            oi_setWheels(0,0);
+            uart_sendStr("\r\nManual Stop Acknowledged.\r\n> ");
+            command_flag = 0;
+        }
+
+        // Mission Start
+        if (command_flag == 1) {
+            command_flag = 0; 
+            bool mission_running = true;
+
+            // This loop allows the robot to move iteratively and re-scan
+            while (mission_running) {
+                lcd_clear();
+                lcd_printf("Scanning...");
+
+                // 1. Execute Scan
+                detectedObj target = scan_and_find_smallest();
+
+                // 2. Did the user hit 's' during the scan? Break out.
+                if (command_flag == 2) {
+                    oi_setWheels(0,0);
+                    uart_sendStr("\r\nMission Aborted.\r\n> ");
+                    command_flag = 0;
+                    mission_running = false;
+                    continue; 
+                }
+
+                // 3. Evaluate the target and move
+                if (target.id != -1) {
+                    sprintf(buffer, "\r\nTarget Acquired! Obj %d (Width: %.2f cm).\r\n", 
+                            target.id, target.linear_width_cm);
+                    uart_sendStr(buffer);
+                    lcd_clear();
+                    lcd_printf("Target Acquired");
+
+                    // Correct Heading
+                    int midpoint = target.start_angle + ((target.end_angle - target.start_angle) / 2);
+                    if (midpoint < 90) {
+                        turn_right(sensor_data, (90 - midpoint));
+                    } else if (midpoint > 90) {
+                        turn_left(sensor_data, (midpoint - 90));
+                    }
+
+                    // Calculate remaining distance to target (stop 10cm / 100mm short)
+                    double distance_to_drive_mm = (target.distance_cm * 10.0) - 100.0;
+                    
+                    if (distance_to_drive_mm <= 0) {
+                        // We are within 10cm! Mission Success.
+                        uart_sendStr("\r\nTarget Reached (Within 10cm).\r\n> ");
+                        lcd_clear();
+                        lcd_printf("Mission Complete");
+                        mission_running = false;
+                    } else {
+                        // ROBUST MOVEMENT: Drive a maximum of 25cm (250mm) at a time
+                        double drive_chunk = (distance_to_drive_mm > 250.0) ? 250.0 : distance_to_drive_mm;
+                        
+                        sprintf(buffer, "Moving %.2f mm closer...\r\n", drive_chunk);
+                        uart_sendStr(buffer);
+                        
+                        move_forward(sensor_data, drive_chunk);
+                        
+                        // After moving the chunk, the while(mission_running) loop 
+                        // repeats automatically, triggering a fresh scan from the new location!
+                    }
+
+                } else {
+                    uart_sendStr("\r\nNo valid objects found. Awaiting next command.\r\n> ");
+                    lcd_clear();
+                    lcd_printf("No Objects");
+                    mission_running = false; // End mission if it loses tracking
+                }
+            }
+        }
+    }
+    
+    oi_free(sensor_data);
+    return 0;
+}
