@@ -14,7 +14,8 @@
 #include "movement.h"         // Hazard-safe movement logic
 #include "scanner.h"          // Sensor fusion wrapper (IR + Ping + Servo)
 
-extern volatile char command_received; 
+extern volatile char command_received;
+extern volatile int command_flag;
 
 //Auto and Manual
 typedef enum {
@@ -26,6 +27,7 @@ typedef enum {
     AUTO_STATE_SCANNING,
     AUTO_STATE_DRIVING,
     AUTO_STATE_AVOIDING,
+    AUTO_STATE_EMERGENCY,
     AUTO_STATE_DONE
 } AutoState;
 
@@ -51,8 +53,16 @@ typedef struct {
     int16_t x;
     int16_t y;
     int16_t heading;
-    //maybe some others data usage shouldn't matter too much if we output to a file 
+    //maybe some others data usage shouldn't matter too much if we output to a file
 } detectedObj;
+
+oi_t *sensor_data;
+char tx_buffer[100];
+
+// --- Helper Function Prototypes ---
+void update_odometry(oi_t *sensor_data);
+void send_telemetry(const char* message);
+int check_hazards(oi_t *sensor_data);
 
 int main(void) {
     // 1. Initialize all hardware modules
@@ -74,6 +84,11 @@ int main(void) {
 
     //main loop
     while (1) {
+
+        oi_update(sensor_data);
+        update_odometry(sensor_data);
+
+
         if (command_received != '\0') {
             
             // Global overrides
@@ -184,7 +199,22 @@ int main(void) {
                         current_auto_state = AUTO_STATE_AVOIDING;
                     }
                     break;
-                    
+
+                case AUTO_STATE_EMERGENCY:
+                    lcd_printf("HAZARD DETECTED!\nHalting.");
+
+                    // Alert PC GUI
+                    char tx_buffer[50];
+                    sprintf(tx_buffer, "HAZARD:%d,%d,%d,%d\r\n",
+                        sensor_data->bumpLeft, sensor_data->bumpRight,
+                        sensor_data->cliffLeft, sensor_data->cliffRight);
+                    send_telemetry(tx_buffer);
+
+                    // Back up slightly safely
+                    move_backward(sensor_data, 100); // Back up 10cm
+                    current_auto_state = AUTO_STATE_AVOIDING;
+                    break;
+
                 case AUTO_STATE_AVOIDING:
                     lcd_printf("AUTO: Avoiding Hazard!");
                     // Back up slightly
@@ -205,5 +235,48 @@ int main(void) {
     }
 	
     oi_free(sensor_data);
+    return 0;
+}
+
+
+// --- Odometry Implementation ---
+void update_odometry(oi_t *sensor_data) {
+    // 1. Get relative angle from chassis (Replace with IMU later if implemented)
+    current_heading += sensor_data->angle;
+
+    // Keep heading bound between 0 and 359 degrees
+    while(current_heading >= 360) current_heading -= 360;
+    while(current_heading < 0) current_heading += 360;
+
+    // 2. Calculate distance traveled since last update
+    float distance = sensor_data->distance; // in mm
+
+    if (distance != 0) {
+        // Convert heading to radians for trig math
+        float heading_rad = current_heading * (PI / 180.0);
+
+        // Update X and Y coordinates on the Cartesian plane
+        current_x += distance * cos(heading_rad);
+        current_y += distance * sin(heading_rad);
+    }
+}
+
+// --- UART Telemetry & Processing ---
+void send_telemetry(const char* message) {
+    int i = 0;
+    while(message[i] != '\0') {
+        uart_sendChar(message[i]); // Assuming uart_sendChar is in uart-interrupt.c
+        i++;
+    }
+}
+// --- Hazard Checking ---
+int check_hazards(oi_t *sensor_data) {
+    // Returns 1 if a bump or cliff is detected, 0 if safe
+    if (sensor_data->bumpLeft || sensor_data->bumpRight ||
+        sensor_data->cliffLeft || sensor_data->cliffRight ||
+        sensor_data->cliffFrontLeft || sensor_data->cliffFrontRight ||
+        sensor_data->wheelDropLeft || sensor_data->wheelDropRight) {
+        return 1;
+    }
     return 0;
 }

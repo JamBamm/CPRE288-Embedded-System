@@ -17,11 +17,11 @@ void perform_sweep(void) {
         timer_waitMillis(30); 
         
         // Read sensors
-        float ir_dist = ir_distance_from_adc();
+        float ir_adc = adc_read_avg();
         float ping_dist = ping_getDistance();
         
         // Format the data as a string (e.g., "ANGLE,IR,PING\n")
-        sprintf(uart_msg, "%d,%.2f,%.2f\n", angle, ir_dist, ping_dist);
+        sprintf(uart_msg, "%d,%.2f,%.2f\n", angle, ir_adc, ping_dist);
         
         // Send string to Python GUI
         uart_sendStr(uart_msg); 
