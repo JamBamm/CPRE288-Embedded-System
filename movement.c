@@ -1,219 +1,183 @@
-#include "lcd.h"
 #include "open_interface.h"
 #include "Timer.h"
 #include "movement.h"
-#include "driverlib/interrupt.h"
 #include "uart-interrupt.h"
 #include <math.h>
 
-extern volatile char command_byteGo;
-extern volatile char command_byteStop;
+extern volatile char g_command_byte;
+extern volatile bool g_command_ready;
 
+extern void update_odometry(oi_t *sensor_data);
+extern void send_gui_telemetry(oi_t *sensor_data);
 
 extern volatile int command_flag;
 
-static void drive_forward_no_bump(oi_t *self, double distance_mm, int speed)
-{
+int check_hazards(oi_t *sensor_data) {
+    if (1 == sensor_data->bumpLeft) return 1;
+    if (1 == sensor_data->bumpRight) return 2;
+    
+    // 2. Drop-off / Hole Detection (Codes 3-4)
+    if (sensor_data->cliffLeftSignal <= 200 || sensor_data->cliffFrontLeftSignal <= 200) {
+        return 3; // Left Drop-off
+    }
+    if (sensor_data->cliffRightSignal <= 200 || sensor_data->cliffFrontRightSignal <= 200) {
+        return 4; // Right Drop-off
+    }
+    
+    // 3. Boundary / White Tape Detection (Codes 5-6)
+    // Comment this block out when testing on your white tile floor!
+    /*
+    if (sensor_data->cliffLeftSignal >= 2600 || sensor_data->cliffFrontLeftSignal >= 2600) {
+        return 5; // Left Boundary
+    }
+    if (sensor_data->cliffRightSignal >= 2600 || sensor_data->cliffFrontRightSignal >= 2600) {
+        return 6; // Right Boundary
+    }
+    */
+    
+    return 0; // Safe
+}
+
+
+
+// ==============================================================================
+// Safe Forward Movement
+// ==============================================================================
+int move_forward(oi_t *self, double distance_mm, int speed) {
     double sum = 0;
+    
+    // Ensure speed is positive for forward movement
+    speed = abs(speed);
     oi_setWheels(speed, speed);
 
     while (sum < distance_mm) {
         oi_update(self);
+		
+		update_odometry(self);
+        send_gui_telemetry(self);
+		
         sum += self->distance;
-        if (command_flag == 2) {
-            oi_setWheels(0, 0);
-            break;
+
+        // 1. Hardware Hazard Checks
+        int hazard = check_hazards(self);
+        if (hazard != 0) {
+            oi_setWheels(0, 0); 
+            return hazard; 
         }
+
+        // 2. Software Interrupt Checks (Emergency Stop from Base Station)
+        if (g_command_ready) {
+            // If user presses spacebar or 'm' for manual mode, abort movement!
+            if (g_command_byte == ' ' || g_command_byte == 'm') {
+                oi_setWheels(0, 0);
+                g_command_ready = false; // Consume the command
+                return -1;
+            }
+        }
+        
+        timer_waitMillis(50); // Loop stability
     }
 
     oi_setWheels(0, 0);
+    return 0; // Success
 }
 
-double move_forward(oi_t *self, double distance_mm)
-{
-    double forward_sum = 0;
-    const double backup_mm = 150.0;
-    const double lateral_mm = 250.0;
-    const double turn_deg  = 90.0;
-
-    oi_setWheels(100, 100);
-
-    while (forward_sum < distance_mm) {
-        oi_update(self);
-        forward_sum += self->distance;
-        if (command_flag == 2) {
-                    oi_setWheels(0, 0);
-                    break;
-                }
-
-
-        if (self->bumpLeft || self->bumpRight) {
-            
-            oi_setWheels(0, 0);
-
-            
-            move_backward(self, backup_mm);
-
-           
-            oi_update(self);
-
-           
-            if (self->bumpRight && !self->bumpLeft) {
-                turn_left(self, turn_deg);     
-            } else if (self->bumpLeft && !self->bumpRight) {
-                turn_right(self, turn_deg);    
-            } else {
-                
-                turn_right(self, turn_deg);
-            }
-
-            drive_forward_no_bump(self, lateral_mm, 100);
-
-            if (self->bumpRight && !self->bumpLeft) {
-                turn_right(self, turn_deg);
-            } else if (self->bumpLeft && !self->bumpRight) {
-                turn_left(self, turn_deg);
-            } else {
-                
-                turn_left(self, turn_deg);
-            }
-            
-            drive_forward_no_bump(self, backup_mm, 100);
-
-            oi_setWheels(100, 100);
-        }
-    }
-
-    oi_setWheels(0, 0);
-    return forward_sum;
-}
-
-//change direction then move forward
-double move_backward(oi_t *self, double distance_mm)
-{
+// ==============================================================================
+// Safe Backward Movement
+// ==============================================================================
+int move_backward(oi_t *self, double distance_mm, int speed) {
     double sum = 0;
-    oi_setWheels(-100, -100);
+    
+    // Ensure speed is positive, then negate it for wheels
+    speed = abs(speed);
+    oi_setWheels(-speed, -speed);
 
     while (sum < distance_mm) {
         oi_update(self);
-        sum -= self->distance; 
-        if (command_flag == 2) {
-            oi_setWheels(0, 0);
-            break;
+		
+		update_odometry(self);
+        send_gui_telemetry(self);
+        // Distance is negative when moving backwards, use absolute value for logic
+        sum += abs(self->distance); 
+
+        // 2. Software Interrupt Checks
+        if (g_command_ready) {
+            if (g_command_byte == ' ' || g_command_byte == 'm') {
+                oi_setWheels(0, 0);
+                g_command_ready = false; 
+                return -1;
+            }
         }
+        
+        timer_waitMillis(50);
     }
 
     oi_setWheels(0, 0);
-    return sum;
+    return 0;
 }
 
-double turn_right(oi_t *self, double degrees)
-{
+// ==============================================================================
+// Safe Right Turn (Clockwise)
+// ==============================================================================
+int turn_right(oi_t *self, double degrees, int speed) {
     double sum = 0;
-    oi_setWheels(-100, 100);
+    
+    speed = abs(speed);
+    oi_setWheels(-speed, speed); 
 
     while (sum < degrees) {
         oi_update(self);
-        sum -= self->angle;
-        if (command_flag == 2) {
-            oi_setWheels(0, 0);
-            break;
+		
+		update_odometry(self);
+        send_gui_telemetry(self);
+        
+        // Future Upgrade: Replace this with reading from the IMU heading!
+        // Angle is negative for CW turns in open_interface, use absolute value
+        sum += abs(self->angle); 
+
+        if (g_command_ready) {
+            if (g_command_byte == ' ' || g_command_byte == 'm') {
+                oi_setWheels(0, 0);
+                g_command_ready = false;
+                return -1;
+            }
         }
+        timer_waitMillis(50); //up for debate 
     }
 
     oi_setWheels(0, 0);
-    return sum;
+    return 0;
 }
 
-double turn_left(oi_t *self, double degrees)
-{
+// ==============================================================================
+// Safe Left Turn (Counter-Clockwise)
+// ==============================================================================
+int turn_left(oi_t *self, double degrees, int speed) {
     double sum = 0;
-    oi_setWheels(100, -100);
+    
+    speed = abs(speed);
+    oi_setWheels(speed, -speed); 
 
     while (sum < degrees) {
         oi_update(self);
+		
+		update_odometry(self);
+        send_gui_telemetry(self);
+        
+        // Future Upgrade: Replace this with reading from the IMU heading!
+        // Angle is positive for CCW turns
         sum += self->angle; 
-        if (command_flag == 2) {
-            oi_setWheels(0, 0);
-            break;
+
+        if (g_command_ready) {
+            if (g_command_byte == ' ' || g_command_byte == 'm') {
+                oi_setWheels(0, 0);
+                g_command_ready = false;
+                return -1;
+            }
         }
+        timer_waitMillis(50);
     }
 
     oi_setWheels(0, 0);
-    return sum;
-}
-
-// Returns 0 if safe, or an error code (1 for bump, 2 for cliff, etc.) if a hazard is hit
-int check_hazards(oi_t *sensor_data) {
-    oi_update(sensor_data);
-    
-    // Check for physical bumps
-    if (sensor_data->bumpLeft || sensor_data->bumpRight) {
-        return 1; 
-    }
-    
-    // Check for cliffs (dropping off a ledge)
-    if (sensor_data->cliffLeft || sensor_data->cliffRight || 
-        sensor_data->cliffFrontLeft || sensor_data->cliffFrontRight) {
-        return 2; 
-    }
-    
-    // Check for boundary lines (white tape)
-    if (sensor_data->cliffLeftSignal > 2700 || sensor_data->cliffRightSignal > 2700) { 
-        // Note: You must calibrate the > 2700 threshold based on your specific floor/tape!
-        return 3;
-    }
-    
-    return 0; // All clear!
-}
-
-void move_forward_safe(oi_t *sensor_data, int millimeters) {
-    int sum = 0;
-    oi_setWheels(150, 150); // Move forward at 150 mm/s
-    
-    while (sum < millimeters) {
-        oi_update(sensor_data);
-        sum += sensor_data->distance;
-        
-        int hazard = check_hazards(sensor_data);
-        if (hazard != 0) {
-            oi_setWheels(0, 0); // STOP IMMEDIATELY
-            
-            // Optional: Automatically back up 5cm when you hit something
-            // move_backward(sensor_data, 50); 
-            
-            // Alert Python GUI about the hazard
-            uart_sendStr("HAZARD DETECTED\n"); 
-            return; // Exit the function early
-        }
-    }
-    
-    oi_setWheels(0, 0); // Stop when destination reached safely
-}
-// Returns 0 if it reached the distance, or the hazard code if it stopped early
-int move_forward_safe_auto(oi_t *sensor_data, int millimeters) {
-    int sum = 0;
-    oi_setWheels(150, 150); 
-    
-    while (sum < millimeters) {
-        // BREAKOUT CLAUSE: If the user hit the emergency stop button in GUI
-        if (command_received == 'x' || command_received == 'm') {
-            oi_setWheels(0, 0);
-            return -1; // Abort code
-        }
-
-        oi_update(sensor_data);
-        sum += sensor_data->distance;
-        
-        int hazard = check_hazards(sensor_data);
-        if (hazard != 0) {
-            oi_setWheels(0, 0);
-            // Automatically back up away from the hazard
-            // move_backward(sensor_data, 50); 
-            return hazard; // Let the state machine handle the avoidance logic
-        }
-    }
-    
-    oi_setWheels(0, 0);
-    return 0; // Success
+    return 0;
 }

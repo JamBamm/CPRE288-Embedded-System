@@ -2,11 +2,17 @@
 #include "Timer.h"
 #include <stdint.h>
 #include "inc/tm4c123gh6pm.h"
+#include "button.h"
+#include "lcd.h"
 
 #define SERVO_PERIOD_COUNTS   320000U
 
-#define SERVO_MATCH_0_DEG     311500U
-#define SERVO_MATCH_180_DEG   284500U
+
+static uint32_t g_match_0_deg = 311500U;
+static uint32_t g_match_180_deg = 284500U;
+//bot 18
+//static uint32_t g_match_0_deg = 312800;
+//static uint32_t g_match_180_deg = 285950;
 
 static uint16_t g_current_angle = 90;
 static uint32_t g_current_match = 297500U;
@@ -21,8 +27,9 @@ static uint32_t servo_compute_match(uint16_t degrees)
         degrees = 180;
     }
 
-    span = SERVO_MATCH_0_DEG - SERVO_MATCH_180_DEG;
-    match = SERVO_MATCH_0_DEG - ((span * degrees) / 180U);
+    // Determine the distance between endpoints using variables
+    span = g_match_0_deg - g_match_180_deg;
+    match = g_match_0_deg - ((span * degrees) / 180U);
 
     return match;
 }
@@ -118,3 +125,97 @@ uint32_t servo_get_match_value(void)
 {
     return g_current_match;
 }
+
+void servo_calibrate(void) 
+{
+    // Start calibration at the mathematical center of your current limits
+    uint32_t current_match = (g_match_0_deg + g_match_180_deg) / 2; 
+    int state = 0; // 0 = Calibrating 0 degrees, 1 = Calibrating 180 degrees
+    uint8_t button;
+    
+    int step_size = 50;         // Default to small increments
+    bool big_steps = false;     // Track toggle state
+
+    // Move servo to starting position
+    TIMER1_TBMATCHR_R = current_match & 0xFFFF;
+    TIMER1_TBPMR_R    = (current_match >> 16) & 0xFF;
+
+    while (state < 2) 
+    {
+        button = button_getButton();
+
+        // Button 1: Adjust Left
+        if (button == 1) 
+        {
+            current_match += step_size; 
+            TIMER1_TBMATCHR_R = current_match & 0xFFFF;
+            TIMER1_TBPMR_R    = (current_match >> 16) & 0xFF;
+            timer_waitMillis(100); // Slight debounce for movement
+        } 
+        // Button 2: Adjust Right
+        else if (button == 2) 
+        {
+            current_match -= step_size;
+            TIMER1_TBMATCHR_R = current_match & 0xFFFF;
+            TIMER1_TBPMR_R    = (current_match >> 16) & 0xFF;
+            timer_waitMillis(100); // Slight debounce for movement
+        } 
+        // Button 3: Toggle Increment Size
+        else if (button == 3)
+        {
+            big_steps = !big_steps; // Flip the boolean
+            step_size = big_steps ? 250 : 50; 
+            timer_waitMillis(300); // Heavier debounce to prevent rapid toggling
+        }
+        // Button 4: Confirm and Save
+        else if (button == 4) 
+        {
+            if (state == 0) 
+            {
+                g_match_0_deg = current_match;
+                state = 1; // Move to 180-degree calibration
+                timer_waitMillis(500); // Debounce button to prevent double-clicking
+            } 
+            else if (state == 1) 
+            {
+                g_match_180_deg = current_match;
+                state = 2; // Exit calibration loop
+            }
+        }
+
+        // Display current target, match value, and step size on LCD
+        if (state == 0) 
+        {
+            lcd_printf("Set 0 Deg Ref\nMatch: %u\nStep: %d (B3)", current_match, step_size);
+        } 
+        else if (state == 1) 
+        {
+            lcd_printf("Set 180 Deg Ref\nMatch: %u\nStep: %d (B3)", current_match, step_size);
+        }
+
+        timer_waitMillis(50); // Prevent LCD flickering
+    }
+
+    // --- NEW EXIT LOGIC ---
+    // Display final values and instruct user to press B4 to exit
+    lcd_printf("Calibrated!\n0:%u 180:%u\nPress B4 to Exit", g_match_0_deg, g_match_180_deg);
+    
+    // Trap the program here until Button 4 is pressed
+    while (button_getButton() != 4) 
+    {
+        timer_waitMillis(50);
+    }
+
+    // Trap the program here until Button 4 is released
+    while (button_getButton() == 4) 
+    {
+        timer_waitMillis(50);
+    }
+    
+    // Resync the internal state variables to 90 degrees based on new limits
+    servo_move(90); 
+    
+    // Clear the screen so the user knows calibration is completely done
+    lcd_printf("Ready"); 
+}
+

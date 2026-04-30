@@ -2,15 +2,36 @@
 #define SCANNER_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 
-// A struct to hold a single data point
+// Must define this BEFORE the gap struct and prototypes
 typedef struct {
-    uint16_t angle;
-    float ir_distance;
-    float ping_distance;
-} ScanData;
+    int8_t id;
+    uint8_t s_angle;
+    uint8_t e_angle;
+	uint8_t c_angle;
+    float dist_cm;
+    float l_width_cm;
+} DetectedObject;
 
-// Function to perform a full 180-degree sweep and transmit data
-void perform_sweep(void);
+typedef struct {
+    int8_t id;
+    uint8_t s_angle;
+    uint8_t e_angle;
+	uint8_t c_angle;
+    float dist_cm;
+    float l_width_cm;
+} DetectedGap;
+
+// Core Scanner Functions
+int perform_advanced_sweep(DetectedObject objects[], int max_objects);
+DetectedObject find_smallest_object(DetectedObject objects[], int num_objects);
+
+// Gap Logic
+int calculate_all_gaps(DetectedObject objects[], int num_objects, DetectedGap gaps[], int max_gaps);
+DetectedGap find_best_driveable_gap(DetectedGap gaps[], int num_gaps, int robot_width_cm);
+
+// NEW: Parking Logic
+DetectedGap check_for_parking_zone(DetectedObject objects[], int num_objects);
 
 #endif

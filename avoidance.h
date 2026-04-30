@@ -5,11 +5,11 @@
  *      Author: jbiced3
  */
 
-#ifndef AVOIDANCE_H_
-#define AVOIDANCE_H_
+//#ifndef AVOIDANCE_H_
+//#define AVOIDANCE_H_
 
-class avoidance
-{
-};
+//class avoidance
+//{
+//};
 
-#endif /* AVOIDANCE_H_ */
+//#endif /* AVOIDANCE_H_ */

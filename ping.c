@@ -4,7 +4,7 @@
  * @author Jamison Bice 
  */
 
-#include "ping_template.h"
+#include "ping.h"
 #include "Timer.h"
 #include "driverlib/interrupt.h"
 

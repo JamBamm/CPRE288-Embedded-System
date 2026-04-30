@@ -19,6 +19,7 @@ import os  # import function for finding absolute path to this python script
 import numpy as np  # NEW: For polar math
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import math
 
 angles_rad = []
 distances_cm = []
@@ -356,7 +357,15 @@ def highlight_objects():
     
     if canvas:
         canvas.draw_idle()
+def calculate_global_position(robot_x, robot_y, robot_heading, scan_angle, distance):
+    # Convert angles to radians
+    # Note: Cybot angles usually require subtracting the scan angle from the heading
+    absolute_angle_rad = math.radians(robot_heading + scan_angle)
 
+    obj_x = robot_x + (distance * math.cos(absolute_angle_rad))
+    obj_y = robot_y + (distance * math.sin(absolute_angle_rad))
+
+    return obj_x, obj_y
 # Client socket code (Run by a thread created in main)
 def socket_thread():
     # Define Globals
@@ -425,7 +434,29 @@ def socket_thread():
                 # Ignore empty blank lines
                 if not clean_msg:
                     continue
-                    
+                ## Inside the while True loop in socket_thread()
+                #clean_msg = rx_message.strip()
+
+                #if clean_msg.startswith("TEL:"):
+                    # Parse Telemetry (Odometry & Hardware)
+                    data = clean_msg[4:].split(',')
+                    robot_x, robot_y, robot_heading = float(data[0]), float(data[1]), int(data[2])
+                    # Update your GUI labels with these variables here!
+
+                #elif clean_msg.startswith("RAW:"):
+                    # Parse Scan Data (IR and PING)
+                    data = clean_msg[4:].split(',')
+                    angle, ir_dist, ping_dist = int(data[0]), float(data[1]), float(data[2])
+                    # Send to graphing arrays
+
+               # elif clean_msg.startswith("OBJ:"):
+                    # Parse calculated objects
+                    data = clean_msg[4:].split(',')
+                    # Draw circles on the map
+
+                #else:
+                    # Treat anything else as a system message
+                    print(f"[Cybot]: {clean_msg}")
                 # Did the robot just start a scan
                 if "--- SCANNING" in clean_msg:
                     print(f"[CyBot Status]: {clean_msg}")

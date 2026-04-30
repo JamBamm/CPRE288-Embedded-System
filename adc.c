@@ -204,3 +204,68 @@ int ir_distance_from_adc(uint16_t adc_val)
     return -1;
 
 }
+
+void calibrate_ir_with_ping(void) {
+    uart_sendStr("\r\n--- IR SENSOR AUTO-CALIBRATION ---\r\n");
+    uart_sendStr("Place a flat object in front of the sensor.\r\n");
+    uart_sendStr("Press B1 to record a data point.\r\n");
+    uart_sendStr("Press B2 to finish and print table.\r\n");
+    uart_sendStr("Press B4 to exit.\r\n");
+
+    int ping_dists[30];
+    uint16_t ir_raws[30];
+    int count = 0;
+    
+    while(1) {
+        uint8_t btn = button_getButton();
+        
+        // Print real-time feed to LCD
+        float current_ping = ping_getDistance();
+        uint16_t current_ir = adc_read_avg();
+        lcd_printf("IR:%u P:%.1f\nPts:%d B1=Rec B2=End", current_ir, current_ping, count);
+        
+        if (btn == 1) { 
+            // Record Point
+            if (count < 30) {
+                ping_dists[count] = (int)(current_ping);
+                ir_raws[count] = current_ir;
+                char msg[60];
+                sprintf(msg, "Recorded! PING: %d cm | IR RAW: %u\r\n", ping_dists[count], ir_raws[count]);
+                uart_sendStr(msg);
+                count++;
+            } else {
+                uart_sendStr("Max points reached (30).\r\n");
+            }
+            // Trap until button is released to prevent double-logging
+            while(button_getButton() == 1) { timer_waitMillis(20); }
+        } 
+        else if (btn == 2) { 
+            // End and Print Table
+            uart_sendStr("\r\n======================================\r\n");
+            uart_sendStr(" COPY AND PASTE THIS INTO adc.c:\r\n");
+            uart_sendStr("======================================\r\n");
+            uart_sendStr("static const ir_calibration_t ir_table[] = {\r\n");
+            for (int i = 0; i < count; i++) {
+                char msg[50];
+                if (i == count - 1) {
+                    sprintf(msg, "    {%u, %d}\r\n", ir_raws[i], ping_dists[i]);
+                } else {
+                    sprintf(msg, "    {%u, %d},\r\n", ir_raws[i], ping_dists[i]);
+                }
+                uart_sendStr(msg);
+            }
+            uart_sendStr("};\r\n======================================\r\n");
+            while(button_getButton() == 2) { timer_waitMillis(20); }
+        }
+        else if (btn == 4) { 
+            // Exit back to menu
+            uart_sendStr("Exiting Calibration...\r\n");
+            while(button_getButton() == 4) { timer_waitMillis(20); }
+            break;
+        }
+        
+        timer_waitMillis(100); // Loop stability
+    }
+    
+    lcd_printf("Diagnostic Mode\nReady.");
+}

@@ -16,10 +16,19 @@
 #include "uart-interrupt.h"
 
 // These variables are declared as examples for your use in the interrupt handler.
-volatile char command_byteGo = '\0' ; // byte value for special character used as a command
-volatile char command_byteStop = '\0';
+//volatile char command_byteGo = '\0' ; // byte value for special character used as a command
+//volatile char command_byteStop = '\0';
+volatile char g_command_byte = '\0';
+volatile bool g_command_ready = false;
+
+#define TX_BUFFER_SIZE 256 // Adjust based on how much data you send at once
+
+volatile char tx_buffer[TX_BUFFER_SIZE];
+volatile int tx_head = 0; // Where we add new characters
+volatile int tx_tail = 0; // Where the interrupt reads characters
 
 
+//external to be used in not only main but possibly other programs
 volatile int command_flag = 0; // flag to tell the main program a special command was received
 
 void uart_interrupt_init(void){
@@ -98,10 +107,37 @@ void uart_interrupt_init(void){
 }
 
 void uart_sendChar(char data){
-	//TODO
-	//sends string doesnt exceed the limit 
-    while (UART1_FR_R & UART_FR_TXFF){}
-    UART1_DR_R = data;
+	// //TODO
+	// //sends string doesnt exceed the limit
+ //    while (UART1_FR_R & UART_FR_TXFF){}
+ //    UART1_DR_R = data;
+	int next_head = (tx_head + 1) % TX_BUFFER_SIZE;
+
+    // If the buffer is completely full, we MUST wait 
+    while (next_head == tx_tail) {}
+
+    // Was the TX interrupt disabled? 
+    // If it is 0, the interrupt is off, which means our buffer was empty and hardware is idle.
+    bool was_idle = ((UART1_IM_R & 0x20) == 0);
+
+    // Temporarily disable the TX interrupt while we modify the buffer
+    // so the ISR doesn't accidentally interrupt us while we update tx_head.
+    UART1_IM_R &= ~0x20; 
+
+    // Drop the character into the waiting room
+    tx_buffer[tx_head] = data;
+    tx_head = next_head;
+
+    // If the hardware was asleep, we must manually feed it the first character.
+    if (was_idle) {
+        UART1_DR_R = tx_buffer[tx_tail];
+        tx_tail = (tx_tail + 1) % TX_BUFFER_SIZE;
+    }
+
+    // 7. Re-enable the TX interrupt. 
+    // If we primed it, the ISR will fire automatically when the hardware finishes sending that byte.
+    // If it was already busy, the ISR will naturally fire when the current byte completes.
+    UART1_IM_R |= 0x20; 
 }
 
 char uart_receive(void){
@@ -113,6 +149,7 @@ char uart_receive(void){
 }
 
 void uart_sendStr(const char *data){
+
 	//TODO for reference see lcd_puts from lcd.c file
     if (!data) return;
 		//handle some special chars
@@ -133,9 +170,7 @@ void uart_sendStr(const char *data){
 
 // Interrupt handler for receive interrupts
 void UART1_Handler(void)
-{
-    char byte_received;
-	
+{	
     //check if handler called due to RX event
     if (UART1_MIS_R & 0x10)
     {
@@ -143,29 +178,28 @@ void UART1_Handler(void)
         UART1_ICR_R |= 0x10;
 
         //store
-        byte_received = (char)(UART1_DR_R & 0xFF);
+        g_command_byte = (char)(UART1_DR_R & 0xFF);
+		g_command_ready = true;
+
 		
 		//echo
-        uart_sendChar(byte_received);
+        uart_sendChar(g_command_byte);
 
-		//handle special char
-        if (byte_received == '\r'){
-            uart_sendChar('\n');
-        }
-        else
-        {
-
-
-            //AS NEEDED
-            //code to handle any other special characters
-            //code to update global shared variables
-            //DO NOT PUT TIME-CONSUMING CODE IN AN ISR
-			if (byte_received == command_byteGo ){
-				command_flag = 1;
-			}else if (byte_received == command_byteStop){
-				command_flag = 2;
-			}
-        }
     }
+	if (UART1_MIS_R & 0x20) // 0x20 is the TX Masked Interrupt Status
+	{
+		UART1_ICR_R |= 0x20; // clear the TX trigger flag
+
+		// Is there anyone left in the waiting room?
+		if (tx_head != tx_tail) {
+			// Yes! Send the next character to the hardware
+			UART1_DR_R = tx_buffer[tx_tail];
+			tx_tail = (tx_tail + 1) % TX_BUFFER_SIZE;
+		} else {
+			// No, the buffer is empty. Turn off the TX interrupt so it doesn't
+			// fire infinitely while we have nothing to say.
+			UART1_IM_R &= ~0x20;
+		}
+	}
 }
 

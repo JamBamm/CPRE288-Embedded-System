@@ -58,3 +58,4 @@ dkms.conf
 /Debug
 targetConfigs/readme.txt
 targetConfigs/Tiva TM4C123GH6PM.ccxml
+/.theia
