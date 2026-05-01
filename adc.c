@@ -107,38 +107,38 @@ static const int ir_table_size = sizeof(ir_table) / sizeof(ir_table[0]);
 
 void adc_init(void)
 {
-    // Enable clocks for Port B and ADC0 
+    // enable clocks for Port B and ADC0 
     SYSCTL_RCGCGPIO_R |= 0x02;
     SYSCTL_RCGCADC_R  |= 0x01;
 
     while ((SYSCTL_PRGPIO_R & 0x02) == 0) {}
     while ((SYSCTL_PRADC_R  & 0x01) == 0) {}
 
-    // Configure PB4 as AIN10
+    // configure PB4 as AIN10
     GPIO_PORTB_DIR_R   &= ~0x10;
     GPIO_PORTB_AFSEL_R |=  0x10;
     GPIO_PORTB_DEN_R   &= ~0x10;
     GPIO_PORTB_AMSEL_R |=  0x10;
 
-    // Disable SS3 during setup
+    // disable SS3 during setup
     ADC0_ACTSS_R &= ~0x08;
 
-    // Processor trigger for SS3
+    // processor trigger for SS3
     ADC0_EMUX_R &= ~0xF000;
 
-    // Use AIN10 
+    // use AIN10 
     ADC0_SSMUX3_R = 10;
 
-    // Single sample, end of sequence, set raw interrupt status
+    // single sample, end of sequence, set raw interrupt status
     ADC0_SSCTL3_R = 0x06;
 
-    // Polling, not ADC interrupts
+    // polling, not ADC interrupts
     ADC0_IM_R &= ~0x08;
 
-    // Default clock config
+    // default clock config
     ADC0_CC_R = 0x0;
 
-    // Re-enable SS3 
+    // re-enable SS3 
     ADC0_ACTSS_R |= 0x08;
 }
 
@@ -146,11 +146,15 @@ uint16_t adc_read(void)
 {
     uint16_t result;
 
-    ADC0_PSSI_R = 0x08;                 // Start SS3 conversion
-    while ((ADC0_RIS_R & 0x08) == 0) {} // Wait for completion 
+	// start SS3 conversion
+    ADC0_PSSI_R = 0x08;             
+	// wait for completion     
+    while ((ADC0_RIS_R & 0x08) == 0) {} 
 
-    result = ADC0_SSFIFO3_R & 0x0FFF;   // 12-bit result
-    ADC0_ISC_R = 0x08;                  // Clear flag
+	// 12-bit result
+    result = ADC0_SSFIFO3_R & 0x0FFF;   
+	// clear flag
+    ADC0_ISC_R = 0x08;                  
 
     return result;
 }
@@ -185,7 +189,7 @@ int ir_distance_from_adc(uint16_t adc_val)
     }
 
 
-    // To return the corresponding calibrated distance value
+    // to return the corresponding calibrated distance value
     for (i = 0; i < ir_table_size - 1; i++)
     {
         uint16_t adc_high = ir_table[i].adc_value;
@@ -219,13 +223,13 @@ void calibrate_ir_with_ping(void) {
     while(1) {
         uint8_t btn = button_getButton();
         
-        // Print real-time feed to LCD
+        //print
         float current_ping = ping_getDistance();
         uint16_t current_ir = adc_read_avg();
         lcd_printf("IR:%u P:%.1f\nPts:%d B1=Rec B2=End", current_ir, current_ping, count);
         
         if (btn == 1) { 
-            // Record Point
+           //record the point
             if (count < 30) {
                 ping_dists[count] = (int)(current_ping);
                 ir_raws[count] = current_ir;
@@ -236,11 +240,11 @@ void calibrate_ir_with_ping(void) {
             } else {
                 uart_sendStr("Max points reached (30).\r\n");
             }
-            // Trap until button is released to prevent double-logging
+            ///trap
             while(button_getButton() == 1) { timer_waitMillis(20); }
         } 
         else if (btn == 2) { 
-            // End and Print Table
+            //print table
             uart_sendStr("\r\n======================================\r\n");
             uart_sendStr(" COPY AND PASTE THIS INTO adc.c:\r\n");
             uart_sendStr("======================================\r\n");
@@ -258,13 +262,13 @@ void calibrate_ir_with_ping(void) {
             while(button_getButton() == 2) { timer_waitMillis(20); }
         }
         else if (btn == 4) { 
-            // Exit back to menu
+      
             uart_sendStr("Exiting Calibration...\r\n");
             while(button_getButton() == 4) { timer_waitMillis(20); }
             break;
         }
         
-        timer_waitMillis(100); // Loop stability
+        timer_waitMillis(100); 
     }
     
     lcd_printf("Diagnostic Mode\nReady.");

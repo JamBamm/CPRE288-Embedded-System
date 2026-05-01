@@ -11,8 +11,8 @@
 #include "movement.h"
 #include "uart-interrupt.h"
 #include "lcd.h"
-#include "scanner.h"    // Needed for scanning
-#include "servo.h"      // Needed for calibration
+#include "scanner.h"    
+#include "servo.h"      
 #include <stdbool.h>
 #include <ctype.h>
 
@@ -30,29 +30,30 @@ int manual_read_number(void)
 
     while (1)
     {
-        c = uart_receive(); // Requires blocking UART receive here
+		//uses blocking
+        c = uart_receive(); 
 
-        // Handle Enter key (carriage return)
+		//handle enter
         if ('\r' == c)
         {
-            buf[i] = '\0'; // Null terminate
+            buf[i] = '\0'; 
             break;
         }
-        // Handle Backspace
+        // handle backspace
         else if ('\b' == c || 127 == c)
         {
             if (i > 0)
             {
                 i--;
-                uart_sendStr("\b \b"); // Erase character from terminal visually
+                uart_sendStr("\b \b"); 
             }
         }
-        // Only accept numbers and negative signs, prevent buffer overflow
+		//only accept numbers
         else if (i < 9 && (isdigit(c) || '-' == c))
         {
             buf[i] = c;
             i++;
-            uart_sendChar(c); // Echo character back to user
+            uart_sendChar(c); 
         }
     }
 
@@ -68,14 +69,12 @@ void manual_handle_command(char cmd, oi_t *sensor_data)
 
     switch (cmd)
     {
-    // --- Small Increment Execution Commands (WASD) ---
     case 'w':
         uart_sendStr("Stepping Forward 10mm\r\n");
         move_forward(sensor_data, 10, 100);
         break;
 
     case 's':
-        // NO BACKWARDS MOVEMENT CONSTRAINT ENFORCED
         //uart_sendStr("STOPPED (Reverse Disabled for Safety)\r\n");
         //oi_setWheels(0, 0); 
         move_backward(sensor_data, 10, 100);
@@ -91,14 +90,14 @@ void manual_handle_command(char cmd, oi_t *sensor_data)
         turn_right(sensor_data, 5, 50);
         break;
 
-    case ' ': // Spacebar
+    case ' ': 
         uart_sendStr("Emergency Stop\r\n");
         oi_setWheels(0, 0);
         break;
 
-        // --- Argument-Based Execution Commands ---
+	//argument based
     case 'f':
-        oi_setWheels(0, 0); // Stop before waiting for input
+        oi_setWheels(0, 0); 
         val = manual_read_number();
         sprintf(msg, "Moving Forward %d mm...\r\n", val);
         uart_sendStr(msg);
@@ -106,7 +105,7 @@ void manual_handle_command(char cmd, oi_t *sensor_data)
         break;
 
     case 't':
-        oi_setWheels(0, 0); // Stop before waiting for input
+        oi_setWheels(0, 0);
         val = manual_read_number();
         sprintf(msg, "Turning %d degrees...\r\n", val);
         if (val > 0)
@@ -119,11 +118,13 @@ void manual_handle_command(char cmd, oi_t *sensor_data)
         }
         break;
 
-        // --- Special Modes (Scan and Calibrate) ---
+    
     case 'p':
+			//maybe parking
+		break;
     case 'g':
         uart_sendStr("Initiating 180-Degree Radar Sweep...\r\n");
-        oi_setWheels(0, 0); // Ensure stopped before scanning
+        oi_setWheels(0, 0); 
         DetectedObject my_objects[10];
 
         perform_advanced_sweep(my_objects, 10);
@@ -132,13 +133,11 @@ void manual_handle_command(char cmd, oi_t *sensor_data)
 
     case 'c':
 
-        //call the calibration servo method
-
         servo_calibrate();
 
         break;
 
-        // --- Ignore carriage returns and standard empty inputs ---
+	//ignore carragie returns
     case '\r':
     case '\n':
         break;

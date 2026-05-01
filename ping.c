@@ -13,7 +13,7 @@
 
 volatile uint32_t g_start_time = 0;
 volatile uint32_t g_end_time = 0;
-volatile enum{LOW, HIGH, DONE} g_state = LOW;// State of ping echo pulse
+volatile enum{LOW, HIGH, DONE} g_state = LOW;
 volatile uint32_t pingDiff = 0;
 //User Timer overflow flag on Timer 3
 volatile uint8_t timerOverflow = 0;
@@ -66,17 +66,17 @@ void ping_init (void){
 
     IntMasterEnable();
 
-    // Configure and enable the timer
+    // configure and enable the timer
     // set for both edges
     TIMER3_CTL_R |= 0x0100;
 }
 
 void ping_trigger (void){
     g_state = LOW;
-    // Disable timer and disable timer interrupt
+    // disable timer and disable timer interrupt
     TIMER3_CTL_R &= ~0x0100;
     TIMER3_IMR_R &= ~0x0400;
-    // Disable alternate function (disconnect timer from port pin)
+    // disable alternate function (disconnect timer from port pin)
     GPIO_PORTB_AFSEL_R &= ~0x08;
 
     // YOUR CODE HERE FOR PING TRIGGER/START PULSE
@@ -90,9 +90,9 @@ void ping_trigger (void){
     GPIO_PORTB_DATA_R &= ~0x08;
 
 
-    // Clear an interrupt that may have been erroneously triggered
+    // clear an interrupt that may have been erroneously triggered
 	TIMER3_ICR_R = 0x0400;
-    // Re-enable alternate function, timer interrupt, and timer
+    // re-enable alternate function, timer interrupt, and timer
     GPIO_PORTB_AFSEL_R |= 0x08;
 
     TIMER3_IMR_R |= 0x0400;
@@ -137,10 +137,9 @@ float ping_getDistance (void){
     // YOUR CODE HERE
 	ping_trigger();
     
-    // Wait until the ISR 
+    // wait until the ISR 
     while (g_state != DONE) {}
 
-    // Check if the Timer B Time-Out Raw Interrupt Status bit (Bit 8) flipped to 1
     //if (TIMER3_RIS_R & 0x0100) {
     //    timerOverflow++;
     //    TIMER3_ICR_R = 0x0100;
@@ -150,18 +149,18 @@ float ping_getDistance (void){
         timerOverflow++;
         pingDiff = (g_end_time - g_start_time ) & 0x00FFFFFF;
     }else {
-        // Calculate pulse width.
+        // calculate pulse width.
         // and works out perfectly across the 24-bit boundary.
         pingDiff = (g_start_time - g_end_time) & 0x00FFFFFF;
     }
 
 
 
-    // Convert clock cycles to time in seconds
+    // convert clock cycles to time in seconds
     float time_seconds = pingDiff / 16000000.0;
     
-    // Convert time to distance sound = 343 m/s = 34300 cm/s
-    // Divide by 2 there and back
+    // convert time to distance sound = 343 m/s = 34300 cm/s
+    // divide by 2 there and back
     float distance_cm = (time_seconds * 34300.0) / 2.0;
 
     return distance_cm;

@@ -15,11 +15,9 @@
 #include "scanner.h"
 #include "movement.h"
 
-// Access the globals from uart-interrupt.c
 extern volatile char g_command_byte;
 extern volatile bool g_command_ready;
 
-// Mock variables for movement.c dependencies
 volatile float current_x = 0.0;
 volatile float current_y = 0.0;
 volatile int current_heading = 90;
@@ -39,7 +37,6 @@ void print_menu(void) {
 }
 
 int main(void) {
-    // 1. Initialize all hardware modules
     timer_init();
     lcd_init();
     button_init();
@@ -48,7 +45,6 @@ int main(void) {
     ping_init();
     servo_init();
     
-    // 2. Initialize Roomba Base
     oi_t *sensor_data = oi_alloc();
     oi_init(sensor_data);
 
@@ -64,12 +60,10 @@ int main(void) {
 
     while (1) {
         
-        // Handle incoming UART commands
         if (g_command_ready) {
             char cmd = g_command_byte;
-            g_command_ready = false; // Consume command
+            g_command_ready = false; 
 
-            // If user presses '9', 'x', or spacebar, kill any running continuous tests
             if (cmd == ' ' || cmd == 'x' || cmd == '9') {
                 continuous_test = false;
                 current_test = '0';
@@ -77,7 +71,6 @@ int main(void) {
                 uart_sendStr("\r\n[HALTED] Tests stopped. Motors killed.\r\n");
                 print_menu();
             } 
-            // Otherwise, start a new test
             else if (cmd >= '1' && cmd <= '8') {
                 continuous_test = true;
                 current_test = cmd;
@@ -86,23 +79,21 @@ int main(void) {
             }
         }
 
-        // Execute the currently selected continuous test
         if (continuous_test) {
             
-            // We need to constantly update the base sensors for tests 5, 6, 7, and 8
             if (current_test >= '5' && current_test <= '8') {
                 oi_update(sensor_data);
             }
 
             switch (current_test) {
                 
-                case '1': // Test ADC (IR Sensor)
+                case '1': // Test ADC 
                 {
                     uint16_t raw_ir = adc_read_avg();
                     int dist_cm = ir_distance_from_adc(raw_ir);
                     sprintf(tx_buffer, "IR Raw: %d | Calc Dist: %d cm\r\n", raw_ir, dist_cm);
                     uart_sendStr(tx_buffer);
-                    timer_waitMillis(250); // Slow down output so putty doesn't flood
+                    timer_waitMillis(250); 
                     break;
                 }
                 case '2': // Test PING
@@ -126,11 +117,11 @@ int main(void) {
                     servo_move(180);
                     timer_waitMillis(500);
                     
-                    continuous_test = false; // Run once and stop
+                    continuous_test = false; 
                     print_menu();
                     break;
 
-                case '4': // Test Scanner Sweep
+                case '4': // Test Sweep
                 {
                     uart_sendStr("Initiating Full Sweep...\r\n");
                     DetectedObject my_objects[10];
@@ -175,7 +166,7 @@ int main(void) {
                     break;
 
                 case '8': // Test Boundary Sensors (White Tape Signals)
-                    // Prints the raw analog values so you can see where your 2600 threshold hits
+                    // prints the raw analog values so you can see where your 2600 threshold hits
                     sprintf(tx_buffer, "TAPE (Raw) -> L: %d | FL: %d | FR: %d | R: %d\r\n", 
                             sensor_data->cliffLeftSignal, sensor_data->cliffFrontLeftSignal, 
                             sensor_data->cliffFrontRightSignal, sensor_data->cliffRightSignal);
@@ -194,22 +185,15 @@ int main(void) {
     return 0;
 }
 
-// ==============================================================================
-// Mocks required to compile movement.c in isolation
-// ==============================================================================
 void update_odometry(oi_t *sensor_data) {
-    // Basic mock to prevent linker errors
     current_heading += sensor_data->angle;
     while(current_heading >= 360) current_heading -= 360;
     while(current_heading < 0) current_heading += 360;
 }
 
 void send_gui_telemetry(oi_t *sensor_data) {
-    // Intentionally left blank for testing so it doesn't spam your UART 
-    // while you are trying to read sensor diagnostic text.
+    //just so it compiles
 }
 void send_telemetry(const char* message) {
-    // Wrapper to easily send strings, useful if you ever change UART ports
-    //Possibly imrpove to add the abilty to send multiple chars or a full file of text
     uart_sendStr(message);
 }

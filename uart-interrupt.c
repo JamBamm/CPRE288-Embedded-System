@@ -111,32 +111,28 @@ void uart_sendChar(char data){
 	// //sends string doesnt exceed the limit
  //    while (UART1_FR_R & UART_FR_TXFF){}
  //    UART1_DR_R = data;
+	//buffer method instead 
 	int next_head = (tx_head + 1) % TX_BUFFER_SIZE;
 
-    // If the buffer is completely full, we MUST wait 
+    //wait if buffer full
     while (next_head == tx_tail) {}
 
-    // Was the TX interrupt disabled? 
-    // If it is 0, the interrupt is off, which means our buffer was empty and hardware is idle.
+	//is tx inturrpt disabled
     bool was_idle = ((UART1_IM_R & 0x20) == 0);
-
-    // Temporarily disable the TX interrupt while we modify the buffer
-    // so the ISR doesn't accidentally interrupt us while we update tx_head.
+	
+	//disable to edit
     UART1_IM_R &= ~0x20; 
 
-    // Drop the character into the waiting room
+	//add the new chars
     tx_buffer[tx_head] = data;
     tx_head = next_head;
 
-    // If the hardware was asleep, we must manually feed it the first character.
     if (was_idle) {
         UART1_DR_R = tx_buffer[tx_tail];
         tx_tail = (tx_tail + 1) % TX_BUFFER_SIZE;
     }
 
-    // 7. Re-enable the TX interrupt. 
-    // If we primed it, the ISR will fire automatically when the hardware finishes sending that byte.
-    // If it was already busy, the ISR will naturally fire when the current byte completes.
+    //now enabled and ready to fire
     UART1_IM_R |= 0x20; 
 }
 
@@ -168,7 +164,7 @@ void uart_sendStr(const char *data){
        }
 }
 
-// Interrupt handler for receive interrupts
+// interrupt handler for receive interrupts
 void UART1_Handler(void)
 {	
     //check if handler called due to RX event
@@ -186,18 +182,16 @@ void UART1_Handler(void)
         uart_sendChar(g_command_byte);
 
     }
-	if (UART1_MIS_R & 0x20) // 0x20 is the TX Masked Interrupt Status
+	//TX interrupt 
+	if (UART1_MIS_R & 0x20) 
 	{
-		UART1_ICR_R |= 0x20; // clear the TX trigger flag
+		UART1_ICR_R |= 0x20; 
 
-		// Is there anyone left in the waiting room?
 		if (tx_head != tx_tail) {
-			// Yes! Send the next character to the hardware
 			UART1_DR_R = tx_buffer[tx_tail];
 			tx_tail = (tx_tail + 1) % TX_BUFFER_SIZE;
 		} else {
-			// No, the buffer is empty. Turn off the TX interrupt so it doesn't
-			// fire infinitely while we have nothing to say.
+			
 			UART1_IM_R &= ~0x20;
 		}
 	}
