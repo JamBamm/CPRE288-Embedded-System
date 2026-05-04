@@ -1,10 +1,4 @@
-/**
- * @file i2c.h
- *
- * Library for I2C on TM4C123GH6PM Microcontroller.
- *
- * @author Braedon Giblin <bgiblin@iastate.edu>
- */
+
 
 #ifndef I2C_H_
 #define I2C_H_

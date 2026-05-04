@@ -1,10 +1,3 @@
-/**
- * @file imu.h
- *
- * Driver for BNO055 IMU.
- *
- * @author Braedon Giblin <bgiblin@iastate.edu>
- */
 
 #ifndef THEIMU_H_
 #define THEIMU_H_

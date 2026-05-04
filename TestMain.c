@@ -21,6 +21,17 @@ extern volatile bool g_command_ready;
 volatile float current_x = 0.0;
 volatile float current_y = 0.0;
 volatile int current_heading = 90;
+void update_odometry(oi_t *sensor_data);
+void send_telemetry(const char* message);
+void send_gui_telemetry(oi_t *sensor_data);
+int check_hazards(oi_t *sensor_data);
+
+#define PI 3.14159265
+
+//Guess
+#define IR_JUMP_THRESHOLD 200
+#define MIN_OBJECT_WIDTH_DEG 6
+#define ROBOT_WIDTH 34
 
 void print_menu(void) {
     uart_sendStr("\r\n=== CYBOT DIAGNOSTIC MENU ===\r\n");
@@ -189,11 +200,56 @@ void update_odometry(oi_t *sensor_data) {
     current_heading += sensor_data->angle;
     while(current_heading >= 360) current_heading -= 360;
     while(current_heading < 0) current_heading += 360;
+
+    float distance_cm = sensor_data->distance / 10.0;
+
+    //convert from polar
+    if (distance_cm != 0) {
+        float heading_rad = current_heading * (PI / 180.0);
+        current_x += distance_cm * cos(heading_rad);
+        current_y += distance_cm * sin(heading_rad);
+    }
 }
 
 void send_gui_telemetry(oi_t *sensor_data) {
-    //just so it compiles
+    char gui_msg[120];
+
+    // format: TEL:X,Y,Heading,L_Cliff,R_Cliff,FL_Cliff,FR_Cliff,LBump,RBump
+    sprintf(gui_msg, "TEL:%.1f,%.1f,%d,%d,%d,%d,%d,%d,%d\r\n",
+            current_x, current_y, current_heading,
+            sensor_data->cliffLeftSignal, sensor_data->cliffRightSignal,
+            sensor_data->cliffFrontLeftSignal, sensor_data->cliffFrontRightSignal,
+            sensor_data->bumpLeft, sensor_data->bumpRight);
+
+    uart_sendStr(gui_msg);
 }
+
 void send_telemetry(const char* message) {
+
+    //possibly imrpove to add the abilty to send multiple chars or a full file of text
     uart_sendStr(message);
+}
+
+int check_hazards(oi_t *sensor_data) {
+    if (1 == sensor_data->bumpLeft) return 1;
+    if (1 == sensor_data->bumpRight) return 2;
+
+    //drop-off / hole detection (Codes 3-4)
+    if (sensor_data->cliffLeftSignal <= 200 || sensor_data->cliffFrontLeftSignal <= 200) {
+        return 3;
+    }
+    if (sensor_data->cliffRightSignal <= 200 || sensor_data->cliffFrontRightSignal <= 200) {
+        return 4;
+    }
+
+    // boundary / white tape detection (Codes 5-6)
+    //commented out cause the floor is all white on non test field
+    //if (sensor_data->cliffLeftSignal >= 2600 || sensor_data->cliffFrontLeftSignal >= 2600) {
+    //    return 5; // Left Boundary
+    //}
+    //if (sensor_data->cliffRightSignal >= 2600 || sensor_data->cliffFrontRightSignal >= 2600) {
+    //    return 6; // Right Boundary
+    //}
+
+    return 0;
 }

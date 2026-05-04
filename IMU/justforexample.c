@@ -1,11 +1,5 @@
-/**
- * @file main.c
- *
- * just for reference!
- *
- * The purpose of this file is to serve as a basic example for IMU usage.
- */
 
+/*
 #include "theimu.h"
 #include "timer.h"
 #include "lcd.h"
@@ -50,7 +44,7 @@ int main() {
  * the actual movement operations are trivial. We simply set a speed value to
  * the wheels (two drive wheels, set a speed to each wheel), and then stop the
  * wheels once we have driven our desired distance.
- */
+
 void imu_move_distance(float dis, int speed){
     if (!sensor_data) {
         return;
@@ -79,7 +73,7 @@ void imu_move_distance(float dis, int speed){
 /*
  * This function uses a simple LCD interface. The library functions should
  * be readily apparant. 
- */
+
 void imu_printChipInfo() {
     lcd_init();
     imu_info_t* chipInfo = imu_getChipInfo();
@@ -104,3 +98,4 @@ void imu_printChipInfo() {
     timer_waitMillis(5000);
     lcd_clear();
 }
+*/

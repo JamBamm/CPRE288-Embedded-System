@@ -21,11 +21,11 @@
 volatile char g_command_byte = '\0';
 volatile bool g_command_ready = false;
 
-#define TX_BUFFER_SIZE 256 // Adjust based on how much data you send at once
+#define TX_BUFFER_SIZE 256
 
 volatile char tx_buffer[TX_BUFFER_SIZE];
-volatile int tx_head = 0; // Where we add new characters
-volatile int tx_tail = 0; // Where the interrupt reads characters
+volatile int tx_head = 0;
+volatile int tx_tail = 0;
 
 
 //external to be used in not only main but possibly other programs

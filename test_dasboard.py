@@ -232,15 +232,28 @@ def socket_thread():
 
             elif clean_msg.startswith("RAW:"):
                 # Example: RAW:90,25.5,24.0
-                data = clean_msg[4:].split(',')
+                data = clean_msg[5:].split(',')
                 # If sweeping starts, clear the old radar lines
-                if int(data[0]) == 0 or int(data[0]) == 2:
-                    angles_rad.clear()
+                if int(data[0]) <= 2:
+                    angles_deg.clear()
                     ir_distances.clear()
                     ping_distances.clear()
+                    current_scan_objects.clear()
+                    
                 try:
-                    window.after(0, update_radar_ui, int(data[0]), float(data[1]), float(data[2]))
-                except ValueError: pass
+                    # data[0]=angle, data[1]=ir_dist, data[2]=ping_dist, data[3]=ir_raw
+                    angle = int(data[0])
+                    ir_dist = float(data[1])
+                    ping_dist = float(data[2])
+                    
+                    # We parse the raw IR value here safely! 
+                    # You could even add it to a new graph later if you wanted to.
+                    if len(data) >= 4:
+                        ir_raw = int(data[3]) 
+                        
+                    window.after(0, update_radar_graphs, angle, ir_dist, ping_dist)
+                except (ValueError, IndexError): 
+                    pass
 
             elif clean_msg.startswith("OBJ:"):
                 # Example: OBJ:id,s_ang,e_ang,c_ang,dist,width

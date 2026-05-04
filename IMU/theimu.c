@@ -1,15 +1,8 @@
-/**
- * @file imu.c
- *
- * Driver for BNO055 IMU.
- *
- * @author Braedon Giblin <bgiblin@iastate.edu>
- */
 
 #include <stdlib.h>
 #include <math.h>
-#include "i2c.h"
-#include "theimu.h"
+#include "IMU/i2c.h"
+#include "IMU/theimu.h"
 #include "timer.h"
 #include "timer.h"
 
@@ -75,6 +68,8 @@ static float vectorMag(float x, float y, float z) {
      mag->z = magReadings[4] + (magReadings[5] << 8);
 
      mag->heading = atan2f(mag->y, mag->x) * 180.0f/M_PI;
+	 
+	 free(magReadings);
 
      return mag;
  }
@@ -158,10 +153,7 @@ uint8_t imu_readRegByte(uint8_t regAddr){
 }
 
 uint8_t* imu_readRegBytes(uint8_t regAddr, size_t dataLen){
-    uint8_t* ret = malloc(sizeof(uint8_t) * dataLen);
     i2c_requestByte(BNO055_ADDRESS_B, regAddr);
-    ret = i2c_recBytes(BNO055_ADDRESS_B, dataLen);
-
-    return ret;
+    return i2c_recBytes(BNO055_ADDRESS_B, dataLen);
 }
 

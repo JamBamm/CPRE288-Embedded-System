@@ -65,13 +65,15 @@ void manual_handle_command(char cmd, oi_t *sensor_data)
 {
     int val = 0;
     char msg[100];
-    int calib_angle;
 
     switch (cmd)
     {
     case 'w':
         uart_sendStr("Stepping Forward 10mm\r\n");
-        move_forward(sensor_data, 10, 100);
+        int hazard_w = move_forward(sensor_data, 10, 100);
+		if (hazard_w != 0) {
+            uart_sendStr("\r\n[CRITICAL] Hardware Safety Stop! Please reverse.\r\n");
+        }
         break;
 
     case 's':
@@ -80,12 +82,12 @@ void manual_handle_command(char cmd, oi_t *sensor_data)
         move_backward(sensor_data, 10, 100);
         break;
 
-    case 'a':
+    case 'q':
         uart_sendStr("Turning Left 5 degrees\r\n");
         turn_left(sensor_data, 5, 50);
         break;
 
-    case 'd':
+    case 'e':
         uart_sendStr("Turning Right 5 degrees\r\n");
         turn_right(sensor_data, 5, 50);
         break;
@@ -101,7 +103,10 @@ void manual_handle_command(char cmd, oi_t *sensor_data)
         val = manual_read_number();
         sprintf(msg, "Moving Forward %d mm...\r\n", val);
         uart_sendStr(msg);
-        move_forward(sensor_data, val, 100);
+        int hazard_f = move_forward(sensor_data, val, 100);
+        if (hazard_f != 0) {
+            uart_sendStr("\r\n[CRITICAL] Hardware Safety Stop! Please reverse.\r\n");
+        }
         break;
 
     case 't':

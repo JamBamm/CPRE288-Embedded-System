@@ -1,12 +1,5 @@
-/**
- * @file i2c.c
- *
- * Library for I2C on TM4C123GH6PM Microcontroller
- *
- * @author Braedon Giblin <bgiblin@iastate.edu>
- */
 
-#include <i2c.h>
+#include <IMU/i2c.h>
 #include <stdlib.h>
 
 void i2c_init() {
@@ -23,6 +16,7 @@ void i2c_init() {
     GPIO_PORTA_AFSEL_R |= 0xC0;
     GPIO_PORTA_ODR_R  |= 0x80;
     GPIO_PORTA_PCTL_R |= 0x33000000;
+	GPIO_PORTA_PUR_R |= 0xC0;
 
     // Enable as master
     I2C1_MCR_R |= 0x10;

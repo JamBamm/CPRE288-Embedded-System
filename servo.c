@@ -111,7 +111,7 @@ void servo_move(uint16_t degrees)
     }
 	
 	//wait might change idk
-    wait_ms = 20 + (diff * 4);
+    wait_ms = 15 + (diff * 4);
     timer_waitMillis(wait_ms);
 
     g_current_angle = degrees;

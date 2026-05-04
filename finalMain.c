@@ -14,16 +14,19 @@
 #include "movement.h"         
 #include "scanner.h"          
 #include "manualMode.h"
+#include "avoidance.h"
+#include "IMU/theimu.h"
+
 
 extern volatile char g_command_byte;
-extern volatile int g_command_ready;
+extern volatile bool g_command_ready;
 
 typedef enum {
     STATE_IDLE,
     STATE_MANUAL_TELEOP,
     STATE_AUTO_SCANNING,
     STATE_AUTO_DRIVING,
-    STATE_AUTO_AVOID,
+    // STATE_AUTO_AVOID,
     STATE_AUTO_PARKING,     
     STATE_HAZARD_RECOVERY
 } RobotState;
@@ -53,6 +56,9 @@ char tx_buffer[100];
 volatile float current_x = 0.0;
 volatile float current_y = 0.0;
 volatile int current_heading = 90;
+volatile float target_drive_distance = 0.0;
+
+volatile bool use_imu = false;
 
 
 void update_odometry(oi_t *sensor_data);
@@ -69,13 +75,27 @@ int main(void) {
 	adc_init();
 	ping_init();
 	servo_init();
+	imu_init();
+    timer_waitMillis(100);
+
+	
+    if (imu_connected()) {
+        use_imu = true;
+        imu_writeReg(IMU_OPR_MODE, NDOF);
+        imu_setDefaultUnits();
+        send_telemetry("SYSTEM: IMU Detected. Using absolute heading.\r\n");
+    } else {
+        use_imu = false;
+        send_telemetry("SYSTEM: IMU NOT DETECTED. Falling back to wheel encoders.\r\n");
+    }
     
     oi_t *sensor_data = oi_alloc();
     oi_init(sensor_data);
 
     oi_setWheels(0, 0);
 
-    
+    int telemetry_counter = 0;
+	
     lcd_printf("Logistics Bot\nStatus: IDLE");
     send_telemetry("Warehouse Telemetry Link Established.\r\n");
 	send_telemetry("Commands: [m] Manual | [a] Auto | [x] E-STOP\r\n> ");
@@ -88,7 +108,12 @@ int main(void) {
 
         oi_update(sensor_data);
         update_odometry(sensor_data);
-        send_gui_telemetry(sensor_data);
+		
+		telemetry_counter++;
+        if (telemetry_counter >= 20) {
+            send_gui_telemetry(sensor_data);
+            telemetry_counter = 0;
+        }
 		
         if(!(current_state == STATE_IDLE)){
 
@@ -100,7 +125,7 @@ int main(void) {
         }
 
         // go to hazard state
-        if (g_hazard_flag != 0 && current_state != STATE_HAZARD_RECOVERY) {
+        if (g_hazard_flag != 0 && current_state != STATE_HAZARD_RECOVERY && current_state != STATE_MANUAL_TELEOP) {
             previous_state = current_state; 
             current_state = STATE_HAZARD_RECOVERY;
         }
@@ -158,6 +183,9 @@ int main(void) {
                 current_state = STATE_AUTO_PARKING;
                 g_command_ready = false;
             }
+			else if (current_state == STATE_IDLE) {
+                g_command_ready = false;
+            }
         }
 		
         int num_objs_found;
@@ -193,18 +221,34 @@ int main(void) {
 				DetectedGap target_gap = check_for_parking_zone(my_objects, num_objs_found);
 				
 				//parking found
-				if (target_gap.id != -1) {
-					send_telemetry("Destination Zone Detected! Initiating Parking Sequence...\r\n");
-					int turn_angle = target_gap.c_angle - 90;
+				if (target_gap.id == 100) { 
+                    // 2+ PILLARS FOUND
+                    send_telemetry("Destination Zone Detected! Initiating Parking Sequence...\r\n");
+                    int turn_angle = target_gap.c_angle - 90;
                     if (turn_angle > 0) { turn_left(sensor_data, turn_angle, 100); } 
                     else if (turn_angle < 0) { turn_right(sensor_data, abs(turn_angle), 100); }
                     
-                    parking_drive_distance = target_gap.dist_cm;
-					
-					current_state = STATE_AUTO_PARKING; 
-				} 
-				//no parking
-				else {
+                    if (target_gap.dist_cm > 60.0) {
+                        target_drive_distance = (target_gap.dist_cm * 10.0) - 400.0; 
+                        current_state = STATE_AUTO_DRIVING;
+                    } else {
+                        parking_drive_distance = target_gap.dist_cm * 10.0;
+                        current_state = STATE_AUTO_PARKING; 
+                    }
+                } 
+                else if (target_gap.id == 99) { 
+                    // ONLY 1 PILLAR FOUND
+                    send_telemetry("1 Pillar found. Approaching to rescan...\r\n");
+                    int turn_angle = target_gap.e_angle - 90; 
+                    if (turn_angle > 0) { turn_left(sensor_data, turn_angle, 100); } 
+                    else if (turn_angle < 0) { turn_right(sensor_data, abs(turn_angle), 100); }
+                    
+                    target_drive_distance = target_gap.dist_cm * 10.0; 
+                    if (target_drive_distance < 50.0) target_drive_distance = 50.0;
+                    
+                    current_state = STATE_AUTO_DRIVING; 
+                }
+                else {
 					DetectedGap my_gaps[10];
 					int num_gaps_found = calculate_all_gaps(my_objects, num_objs_found, my_gaps, 10);
 					
@@ -212,16 +256,19 @@ int main(void) {
 					target_gap = find_best_driveable_gap(my_gaps, num_gaps_found, ROBOT_WIDTH);
 					
 					if (target_gap.id != -1) {
-						int turn_angle = target_gap.c_angle - 90;
-						if (turn_angle > 0) { turn_left(sensor_data, turn_angle, 100); } 
-						else if (turn_angle < 0) { turn_right(sensor_data, abs(turn_angle), 100); }
-						
-						current_state = STATE_AUTO_DRIVING;
-					} else {
-						send_telemetry("BLOCKED: No safe gaps. Reversing out...\r\n");
-						move_backward(sensor_data, 100, 100);
-						turn_left(sensor_data, 90, 100); 
-					}
+                        int turn_angle = target_gap.c_angle - 90;
+                        if (turn_angle > 0) { turn_left(sensor_data, turn_angle, 100); } 
+                        else if (turn_angle < 0) { turn_right(sensor_data, abs(turn_angle), 100); }
+                        
+                        target_drive_distance = (target_gap.dist_cm * 10.0) - 150.0;
+                        
+                        if (target_drive_distance < 50.0) target_drive_distance = 50.0; // Minimum step
+                        
+                        current_state = STATE_AUTO_DRIVING;
+                    } else {
+                        send_telemetry("BLOCKED: No safe gaps. Turning around...\r\n");
+                        turn_left(sensor_data, 180, 100); 
+                    }
 				}
 				break;
 				//Maybe we add a global distance variable that this could intellgiently set
@@ -230,13 +277,24 @@ int main(void) {
 
             case STATE_AUTO_DRIVING:
 				
-				//unfinished just moves forward and then scans agin might be enough prob not
-                move_status = move_forward(sensor_data, 400, 100); 
-                
-                if (move_status == 0) {
+				if (target_drive_distance > 0) {
+                   float step = (target_drive_distance < 50.0) ? target_drive_distance : 50.0;
+                    
+                   move_status = move_forward(sensor_data, step, 100);
+                    
+                    if (move_status == 0) {
+                        target_drive_distance -= 50.0;
+                    } else if (move_status > 0) {
+                        g_hazard_flag = move_status; 
+                        previous_state = current_state;
+                        current_state = STATE_HAZARD_RECOVERY;
+                        target_drive_distance = 0.0; 
+                    } else if (move_status == -1) {
+                        current_state = STATE_MANUAL_TELEOP;
+                        target_drive_distance = 0.0; 
+                    }
+                } else {
                     current_state = STATE_AUTO_SCANNING;
-                } else if (move_status > 0) {
-                    g_hazard_flag = move_status; 
                 }
                 break;
 
@@ -252,19 +310,39 @@ int main(void) {
 				send_telemetry(tx_buffer);
 				
 				//if boundary set as virtual wall
-				if (g_hazard_flag >= 5 && num_virtual_walls < 20) {
-					float heading_rad = current_heading * (PI / 180.0);
-					my_virtual_walls[num_virtual_walls].x = current_x + (15.0 * cos(heading_rad));
-					my_virtual_walls[num_virtual_walls].y = current_y + (15.0 * sin(heading_rad));
-					num_virtual_walls++;
-					send_telemetry("Virtual Wall Recorded.\r\n");
-				}
+				if (g_hazard_flag >= 1 && num_virtual_walls < 20) {
+                    int wall_angle = current_heading;
+                    if (g_hazard_flag == 1 || g_hazard_flag == 3 || g_hazard_flag == 5) {
+                        wall_angle += 30;
+                    } else if (g_hazard_flag == 2 || g_hazard_flag == 4 || g_hazard_flag == 6) {
+                        wall_angle -= 30; 
+                    }
+                    
+                    float heading_rad = wall_angle * (PI / 180.0);
+                    my_virtual_walls[num_virtual_walls].x = current_x + (17.0 * cos(heading_rad));
+                    my_virtual_walls[num_virtual_walls].y = current_y + (17.0 * sin(heading_rad));
+                    num_virtual_walls++;
+                    send_telemetry("Virtual Wall Recorded.\r\n");
+                }
 				//need another virtual wall type thing
 				//for the other hazrds that allows the scanner to still scan over it 
 				//but blocks it in the map as something you can't drive over
 				//so it will only every bump or go over a cliff once
-
-                if (1 == g_hazard_flag) { // left Bump
+				
+				int avoid_result = avoid_hazard_super_safe(sensor_data, g_hazard_flag);
+				
+				if (avoid_result == AVOID_RESULT_DESTINATION_FOUND) {
+                    current_state = STATE_AUTO_PARKING;
+                } else if (avoid_result == AVOID_RESULT_SAFE_CONTINUE) {
+                    current_state = STATE_AUTO_SCANNING; 
+                } else {
+                    current_state = STATE_MANUAL_TELEOP; 
+                }
+                
+                g_hazard_flag = 0; 
+                break;
+				
+                /* if (1 == g_hazard_flag) { // left Bump
                     send_telemetry("HAZARD: Left Bump! Turning right...\r\n");
                     move_backward(sensor_data, 20, 20);
                     turn_right(sensor_data, 90, 100);
@@ -278,7 +356,7 @@ int main(void) {
                 } 
                 else if (3 == g_hazard_flag) { // left Drop-off
                     send_telemetry("CRITICAL: Left Drop-off! Reversing and turning right.\r\n");
-                    move_backward(sensor_data, 30, 20);
+                    move_backward(sensor_data, 10, 20);
                     turn_right(sensor_data, 120, 100); 
                     current_state = STATE_AUTO_SCANNING;
                     g_hazard_flag = 0; 
@@ -286,7 +364,7 @@ int main(void) {
                 }
                 else if (4 == g_hazard_flag) { // right Drop-off
                     send_telemetry("CRITICAL: Right Drop-off! Reversing and turning left.\r\n");
-                    move_backward(sensor_data, 30, 20);
+                    move_backward(sensor_data, 10, 20);
                     turn_left(sensor_data, 120, 100); 
                     current_state = STATE_AUTO_SCANNING;
                     g_hazard_flag = 0; 
@@ -294,7 +372,7 @@ int main(void) {
                 }
                 else if (5 == g_hazard_flag) { // left Boundary
                     send_telemetry("WARNING: Left Safe Zone Boundary! Turning right.\r\n");
-                    move_backward(sensor_data, 40, 30); 
+                    move_backward(sensor_data, 10, 30); 
                     turn_right(sensor_data, 120, 100);  
                     current_state = STATE_AUTO_SCANNING;
                     g_hazard_flag = 0; 
@@ -302,16 +380,16 @@ int main(void) {
                 }
                 else if (6 == g_hazard_flag) { // Right Boundary
                     send_telemetry("WARNING: Right Safe Zone Boundary! Turning left.\r\n");
-                    move_backward(sensor_data, 40, 30); 
+                    move_backward(sensor_data, 10, 30); 
                     turn_left(sensor_data, 120, 100);  
                     current_state = STATE_AUTO_SCANNING;
                     g_hazard_flag = 0; 
 
                 }
                 
-                break;
+                break; */
 
-            case STATE_AUTO_AVOID:
+            /* case STATE_AUTO_AVOID:
                 send_telemetry("Executing Avoidance Maneuver...\r\n");
                 //Should probably make this smarter and maybe use previous scan data or scan itself
 				//to smartely avoid and not get stuck
@@ -329,32 +407,57 @@ int main(void) {
                 send_telemetry("Obstacle cleared. Resuming path.\r\n");
                 current_state = STATE_AUTO_DRIVING;
                 g_hazard_flag = 0; 
-                break;
+                break; */
                 
             case STATE_AUTO_PARKING:
-                send_telemetry("Commencing Precision Parking Sequence...\r\n");
-                
-                if (parking_drive_distance > 0) {
-                    move_forward(sensor_data, parking_drive_distance, 50); 
-                }
+				send_telemetry("\r\n--- PRECISION PARKING SCAN ---\r\n");
+				oi_setWheels(0, 0); 
 				
-				// 1. Utilize IR and PING to verify width between pillars or seeing two small pillars in parrell
-                // 2. Drive slowly into zone
-                // move_forward(sensor_data, 150, 50); 
-                
-                oi_setWheels(0, 0); 
-                
-                lcd_printf("Delivery Complete.");
-                send_telemetry("Destination Reached! Delivery Complete.\r\n");
-                
-                current_state = STATE_IDLE;
-                
-               
-                
-                send_telemetry("Parking Complete! Payload ready for drop-off.\r\n");
-                current_state = STATE_IDLE; 
-                break;
+				DetectedObject park_objects[10];
+				int park_objs_found = perform_advanced_sweep(park_objects, 10);
+				DetectedGap gate = check_for_parking_zone(park_objects, park_objs_found);
 
+				if (gate.id == 100) { 
+					// We see the front two pillars
+					int turn_angle = gate.c_angle - 90;
+					
+					// Turn to perfectly face the center of the gate
+					if (turn_angle > 2) { turn_left(sensor_data, turn_angle, 75); } 
+					else if (turn_angle < -2) { turn_right(sensor_data, abs(turn_angle), 75); }
+
+					if (gate.dist_cm > 25.0) {
+						// We are still far away. Step halfway there to correct for drift.
+						float step_mm = (gate.dist_cm * 10.0) * 0.5; // Drive 50% of the distance
+						send_telemetry("Approaching gate...\r\n");
+						move_forward(sensor_data, step_mm, 75); 
+						// The loop will repeat STATE_AUTO_PARKING and scan again
+						
+					} else {
+						// We are exactly at the threshold of the front pillars!
+						// Drive the final ~30cm to park inside the square
+						send_telemetry("Gate threshold reached. Entering Destination Zone...\r\n");
+						move_forward(sensor_data, 300.0, 50); // 300mm = 30cm
+						oi_setWheels(0, 0); 
+						
+						lcd_printf("Delivery Complete.");
+						send_telemetry("\r\n[DESTINATION REACHED] Parking Complete.\r\n> ");
+						current_state = STATE_IDLE; 
+					}
+					
+				} else if (gate.id == 99) {
+					// We only see 1 pillar, or a messy diagonal. Turn towards it and nudge closer.
+					int turn_angle = gate.e_angle - 90;
+					if (turn_angle > 5) { turn_left(sensor_data, turn_angle, 75); } 
+					else if (turn_angle < -5) { turn_right(sensor_data, abs(turn_angle), 75); }
+					
+					move_forward(sensor_data, 100.0, 75); // Nudge 10cm forward to get a better viewing angle
+					
+				} else {
+					// Lost the pillars entirely
+					send_telemetry("\r\n[ERROR] Lost Destination Zone. Reverting to scanning.\r\n");
+					current_state = STATE_AUTO_SCANNING;
+				}
+				break;
             default:
                 current_state = STATE_IDLE;
                 break;
@@ -370,8 +473,15 @@ int main(void) {
 
 void update_odometry(oi_t *sensor_data) {
 	
-	//want to use IMU in future
-    current_heading += sensor_data->angle;
+	if (use_imu) {
+        mag_t* mag = imu_getMag();
+        float raw_heading = mag->heading;
+        free(mag); 
+        
+        current_heading = (int)raw_heading;
+    } else {
+        current_heading += sensor_data->angle;
+    }
 
     while(current_heading >= 360) current_heading -= 360;
     while(current_heading < 0) current_heading += 360;
@@ -379,10 +489,10 @@ void update_odometry(oi_t *sensor_data) {
 	float distance_cm = sensor_data->distance / 10.0;
 
 	//convert from polar 
-    if (distance != 0) {
+    if (distance_cm != 0) {
         float heading_rad = current_heading * (PI / 180.0);
-        current_x += distance * cos(heading_rad);
-        current_y += distance * sin(heading_rad);
+        current_x += distance_cm * cos(heading_rad);
+        current_y += distance_cm * sin(heading_rad);
     }
 }
 

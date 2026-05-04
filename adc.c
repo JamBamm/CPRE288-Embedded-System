@@ -72,6 +72,17 @@
 
 #include "adc.h"
 #include "inc/tm4c123gh6pm.h"
+#include "uart-interrupt.h"
+#include "button.h"
+#include "ping.h"
+#include "lcd.h"
+#include "timer.h"
+#include <stdio.h>
+
+
+
+
+
 
 typedef struct {
     uint16_t adc_value;
@@ -249,7 +260,8 @@ void calibrate_ir_with_ping(void) {
             uart_sendStr(" COPY AND PASTE THIS INTO adc.c:\r\n");
             uart_sendStr("======================================\r\n");
             uart_sendStr("static const ir_calibration_t ir_table[] = {\r\n");
-            for (int i = 0; i < count; i++) {
+            int i;
+            for (i = 0; i < count; i++) {
                 char msg[50];
                 if (i == count - 1) {
                     sprintf(msg, "    {%u, %d}\r\n", ir_raws[i], ping_dists[i]);

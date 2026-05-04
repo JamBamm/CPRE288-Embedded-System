@@ -9,37 +9,10 @@ extern volatile bool g_command_ready;
 
 extern void update_odometry(oi_t *sensor_data);
 extern void send_gui_telemetry(oi_t *sensor_data);
+extern int check_hazards(oi_t *sensor_data);
+
 
 extern volatile int command_flag;
-
-//exact same hazar method as the one in main
-int check_hazards(oi_t *sensor_data) {
-    if (1 == sensor_data->bumpLeft) return 1;
-    if (1 == sensor_data->bumpRight) return 2;
-    
-    
-    if (sensor_data->cliffLeftSignal <= 200 || sensor_data->cliffFrontLeftSignal <= 200) {
-        return 3; 
-    }
-    if (sensor_data->cliffRightSignal <= 200 || sensor_data->cliffFrontRightSignal <= 200) {
-        return 4; 
-    }
-    
-    // boundary / white tape detection (Codes 5-6)
-    // Comment this block out when testing on your white tile floor!
-    /*
-    if (sensor_data->cliffLeftSignal >= 2600 || sensor_data->cliffFrontLeftSignal >= 2600) {
-        return 5; // Left Boundary
-    }
-    if (sensor_data->cliffRightSignal >= 2600 || sensor_data->cliffFrontRightSignal >= 2600) {
-        return 6; // Right Boundary
-    }
-    */
-    
-    return 0; // Safe
-}
-
-
 
 
 int move_forward(oi_t *self, double distance_mm, int speed) {
@@ -74,7 +47,7 @@ int move_forward(oi_t *self, double distance_mm, int speed) {
         }
         
 		//might loop to fast otherwise idk for sure 
-        timer_waitMillis(50); 
+        timer_waitMillis(150); 
     }
 
     oi_setWheels(0, 0);
@@ -104,7 +77,7 @@ int move_backward(oi_t *self, double distance_mm, int speed) {
             }
         }
         
-        timer_waitMillis(50); //up for debate 
+        timer_waitMillis(150); //up for debate 
     }
 
     oi_setWheels(0, 0);
@@ -134,7 +107,7 @@ int turn_right(oi_t *self, double degrees, int speed) {
                 return -1;
             }
         }
-        timer_waitMillis(50); //up for debate 
+        timer_waitMillis(150); //up for debate 
     }
 
     oi_setWheels(0, 0);
@@ -164,7 +137,7 @@ int turn_left(oi_t *self, double degrees, int speed) {
                 return -1;
             }
         }
-        timer_waitMillis(50);
+        timer_waitMillis(150);
     }
 
     oi_setWheels(0, 0);
