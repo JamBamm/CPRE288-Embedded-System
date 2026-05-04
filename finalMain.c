@@ -418,23 +418,17 @@ int main(void) {
 				DetectedGap gate = check_for_parking_zone(park_objects, park_objs_found);
 
 				if (gate.id == 100) { 
-					// We see the front two pillars
 					int turn_angle = gate.c_angle - 90;
 					
-					// Turn to perfectly face the center of the gate
 					if (turn_angle > 2) { turn_left(sensor_data, turn_angle, 75); } 
 					else if (turn_angle < -2) { turn_right(sensor_data, abs(turn_angle), 75); }
 
 					if (gate.dist_cm > 25.0) {
-						// We are still far away. Step halfway there to correct for drift.
 						float step_mm = (gate.dist_cm * 10.0) * 0.5; // Drive 50% of the distance
 						send_telemetry("Approaching gate...\r\n");
 						move_forward(sensor_data, step_mm, 75); 
-						// The loop will repeat STATE_AUTO_PARKING and scan again
 						
 					} else {
-						// We are exactly at the threshold of the front pillars!
-						// Drive the final ~30cm to park inside the square
 						send_telemetry("Gate threshold reached. Entering Destination Zone...\r\n");
 						move_forward(sensor_data, 300.0, 50); // 300mm = 30cm
 						oi_setWheels(0, 0); 
@@ -445,7 +439,6 @@ int main(void) {
 					}
 					
 				} else if (gate.id == 99) {
-					// We only see 1 pillar, or a messy diagonal. Turn towards it and nudge closer.
 					int turn_angle = gate.e_angle - 90;
 					if (turn_angle > 5) { turn_left(sensor_data, turn_angle, 75); } 
 					else if (turn_angle < -5) { turn_right(sensor_data, abs(turn_angle), 75); }
@@ -453,7 +446,6 @@ int main(void) {
 					move_forward(sensor_data, 100.0, 75); // Nudge 10cm forward to get a better viewing angle
 					
 				} else {
-					// Lost the pillars entirely
 					send_telemetry("\r\n[ERROR] Lost Destination Zone. Reverting to scanning.\r\n");
 					current_state = STATE_AUTO_SCANNING;
 				}
